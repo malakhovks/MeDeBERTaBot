@@ -1,0 +1,23 @@
+# Core deep-learning stack
+torch>=2.6.0           # 2.6+ avoids the torch.load CVE gate
+torchvision>=0.19.0    # not used directly, but binary wheel matches torch
+torchaudio>=2.6.0      # idem
+
+# Hugging Face ecosystem
+transformers>=4.45,<4.48
+accelerate>=0.29
+datasets>=2.19
+evaluate>=0.5
+tokenizers>=0.19
+huggingface_hub>=0.23.4
+
+# Tokeniser back-ends
+sentencepiece>=0.1.99
+
+# Metrics & utilities
+scikit-learn>=1.3      # confusion matrix, precision/recall/F1 if ever needed
+numpy>=1.24
+psutil>=5.9
+
+# Progress bars & pretty logs (pulled in by datasets/transformers, but explicit never hurts)
+tqdm>=4.66
