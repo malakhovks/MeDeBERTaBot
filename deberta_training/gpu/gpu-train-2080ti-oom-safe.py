@@ -142,7 +142,14 @@ trainer = Trainer(model=model,
 # ───────── train ──────────────────────────────────────────────────
 log("Training …")
 t0 = time.time()
-trainer.train()
+# Auto-resume from the latest checkpoint if one exists
+last_ckpt = None
+if os.path.isdir(args.output_dir):
+    from transformers.trainer_utils import get_last_checkpoint
+    last_ckpt = get_last_checkpoint(args.output_dir)
+    if last_ckpt:
+        log(f"Resuming from checkpoint {last_ckpt}")
+trainer.train(resume_from_checkpoint=last_ckpt)
 log(f"Training done in {(time.time()-t0)/60:.1f} min")
 
 # ───────── save & cleanup ─────────────────────────────────────────
