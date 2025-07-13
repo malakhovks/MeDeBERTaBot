@@ -13,6 +13,7 @@ tqdm>=4.66
 # Hugging Face ecosystem
 datasets>=2.19
 transformers>=4.45,<4.48
+accelerate>=0.26.1
 evaluate>=0.5
 sentencepiece>=0.1.99
 
