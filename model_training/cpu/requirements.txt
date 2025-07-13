@@ -1,0 +1,21 @@
+# requirements.txt — minimal, CPU‑only stack
+# Add PyTorch’s CPU wheel index so +cpu builds resolve
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch
+intel_extension_for_pytorch
+
+# Core scientific stack
+numpy
+pyarrow
+tqdm
+
+# Hugging Face ecosystem
+datasets
+transformers
+evaluate
+sentencepiece
+
+# Metrics & utilities
+scikit-learn
+psutil

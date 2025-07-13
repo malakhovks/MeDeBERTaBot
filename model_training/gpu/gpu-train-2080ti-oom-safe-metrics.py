@@ -1,21 +1,20 @@
 #!/usr/bin/env python
 # ------------------------------------------------------------------
-# DeBERTa-v3-small fine-tuning on RTX-2080 Ti (11 GB)
-# – header-proof, OOM-safe, detailed metrics
+# DeBERTa-v3-small fine-tune on RTX-2080 Ti
+# OOM-safe · resume-friendly · rich metrics · NaN guard
 # ------------------------------------------------------------------
 import os, re, random, time, datetime, gc, json, pathlib
 import numpy as np, torch
 
-# ── 0 · ENV PATCHES *before* any HF import ────────────────────────
-_bad = re.compile(r"[^:]+:\s?.+")
+# ── 0 · ENV PATCHES BEFORE _any_ HF import ────────────────────────
 for k, v in list(os.environ.items()):
-    if k.upper().endswith("HEADERS") and not _bad.match(v):
+    if k.upper().endswith("HEADERS") and not re.match(r"[^:]+:\s?.+", v):
         os.environ.pop(k)
 
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
 
-# ── heavy imports AFTER scrub ─────────────────────────────────────
+# ── heavy imports AFTER the scrub ─────────────────────────────────
 from datasets import load_dataset, DatasetDict
 from transformers import (
     AutoTokenizer, AutoModelForSequenceClassification,
@@ -35,12 +34,12 @@ SEED = 42
 random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
 if DEVICE == "cuda": torch.cuda.manual_seed_all(SEED)
 
-# ── hyper-parameters ──────────────────────────────────────────────
+# ── hyper-parameters ─────────────────────────────────────────────
 MODEL_NAME  = "microsoft/deberta-v3-small"
 CSV_PATH    = "data.csv"
 NUM_EPOCHS  = 4
 BATCH_SIZE  = 8
-GRAD_ACCUM  = 4          # effective batch 32
+GRAD_ACCUM  = 4            # effective batch 32
 LR          = 2e-5
 NUM_WORKER  = 4
 
@@ -57,7 +56,7 @@ label2id = {l:i for i,l in enumerate(labels)}
 id2label = {i:l for l,i in label2id.items()}
 dataset  = dataset.map(lambda x: {"labels": label2id[x["label"]]}, remove_columns=["label"])
 
-# ── tokenizer (slow mode, trunc 256) ─────────────────────────────
+# ── tokenizer (slow mode) ────────────────────────────────────────
 try:
     tok = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True, use_fast=False)
 except OSError:
@@ -70,7 +69,7 @@ dataset = dataset.map(
 dataset.set_format("torch")
 data_collator = DataCollatorWithPadding(tok, pad_to_multiple_of=8, return_tensors="pt")
 
-# ── model (try cache first) ──────────────────────────────────────
+# ── model weights ────────────────────────────────────────────────
 try:
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME, local_files_only=True,
@@ -79,10 +78,9 @@ except EnvironmentError:
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME,
         num_labels=len(labels), id2label=id2label, label2id=label2id)
-
 model.to(DEVICE)
 
-# ── metrics ──────────────────────────────────────────────────────
+# ── metrics setup ────────────────────────────────────────────────
 from collections import OrderedDict
 metric_fns = OrderedDict(
     accuracy  = evaluate.load("accuracy"),
@@ -92,9 +90,9 @@ metric_fns = OrderedDict(
     mcc       = evaluate.load("matthews_correlation"),
 )
 
-def compute_metrics(eval_pred):
-    logits = eval_pred[0] if isinstance(eval_pred, tuple) else eval_pred.predictions
-    labels = eval_pred[1] if isinstance(eval_pred, tuple) else eval_pred.label_ids
+def compute_metrics(epred):
+    logits = epred[0] if isinstance(epred, tuple) else epred.predictions
+    labels = epred[1] if isinstance(epred, tuple) else epred.label_ids
     preds  = np.argmax(logits, axis=-1)
     out = {}
     for name, fn in metric_fns.items():
@@ -105,7 +103,7 @@ def compute_metrics(eval_pred):
             out[name] = fn.compute(predictions=preds, references=labels)[name]
     return out
 
-# ── callback for pretty logs ─────────────────────────────────────
+# ── callbacks ────────────────────────────────────────────────────
 class PrintLoss(TrainerCallback):
     def on_log(self, args, state, control, logs=None, **kw):
         if logs and state.is_local_process_zero and "loss" in logs:
@@ -117,7 +115,21 @@ class PrintLoss(TrainerCallback):
                 log(f"Step {state.global_step} | loss {logs['loss']:.4f}")
         return control
 
-# ── TrainingArguments (version-agnostic) ─────────────────────────
+class NanGuard(TrainerCallback):
+    """Abort training if NaN/Inf appears in loss, grads, or parameters."""
+    def on_step_end(self, args, state, control, **kwargs):
+        model  = kwargs["model"]
+        loss   = kwargs.get("loss")
+        if loss is not None and (torch.isnan(loss) | torch.isinf(loss)).any():
+            raise ValueError(f"NaN/Inf detected in loss at step {state.global_step}")
+        for p in model.parameters():
+            if p.grad is not None and (torch.isnan(p.grad).any() or torch.isinf(p.grad).any()):
+                raise ValueError(f"NaN/Inf detected in gradients at step {state.global_step}")
+            if torch.isnan(p).any() or torch.isinf(p).any():
+                raise ValueError(f"NaN/Inf detected in parameters at step {state.global_step}")
+        return control
+
+# ── TrainingArguments ────────────────────────────────────────────
 ta = dict(
     output_dir                 = "deberta-csv-exp",
     per_device_train_batch_size= BATCH_SIZE,
@@ -141,7 +153,6 @@ if "eval_strategy" in TrainingArguments.__init__.__code__.co_varnames:
     ta.update(eval_strategy="epoch", save_strategy="epoch")
 else:
     ta.update(evaluation_strategy="epoch", save_strategy="epoch")
-
 args = TrainingArguments(**ta)
 
 trainer = Trainer(model=model,
@@ -150,65 +161,64 @@ trainer = Trainer(model=model,
                   eval_dataset=dataset["validation"],
                   data_collator=data_collator,
                   compute_metrics=compute_metrics,
-                  callbacks=[PrintLoss])
+                  callbacks=[PrintLoss, NanGuard])   # ← NaN guard added here
+
+# ── resume logic (weights-only) ──────────────────────────────────
+latest_ckpt = None
+ckpt_dir = "deberta-csv-exp"
+if os.path.isdir(ckpt_dir):
+    ckpts = [d for d in os.listdir(ckpt_dir) if d.startswith("checkpoint-")]
+    if ckpts:
+        latest_ckpt = os.path.join(ckpt_dir, sorted(ckpts, key=lambda s:int(s.split('-')[-1]))[-1])
+        log(f"Resuming from {latest_ckpt}")
+        for fn in ("optimizer.pt", "scheduler.pt", "scaler.pt"):
+            fp = os.path.join(latest_ckpt, fn)
+            if os.path.isfile(fp):
+                os.remove(fp); log(f"Removed stale {fn}")
 
 # ── train ─────────────────────────────────────────────────────────
 log("Training …")
-t0 = time.time()
-trainer.train()
-log(f"Training done in {(time.time()-t0)/60:.1f} min")
+start = time.time()
+trainer.train(resume_from_checkpoint=latest_ckpt)
+log(f"Training finished in {(time.time()-start)/60:.1f} min")
 
 # ── save model & tokenizer ───────────────────────────────────────
 trainer.save_model("deberta-csv-final")
 tok.save_pretrained("deberta-csv-final")
 log("Saved best model → deberta-csv-final")
 
-# ── self-describing metrics.json ─────────────────────────────────
-def add_metric(dct, key, value, desc):
-    dct[key] = {"value": float(value), "description": desc}
-
+# ── write metrics.json (unchanged) ───────────────────────────────
+def add(d, k, v, desc): d[k] = {"value": float(v), "description": desc}
 metrics = {}
-
-# best-epoch validation scores
 for e in trainer.state.log_history:
     if "eval_accuracy" in e:
-        add_metric(metrics, "best_val_epoch", e["epoch"],
-                   "Epoch that achieved the highest validation accuracy.")
-        add_metric(metrics, "best_val_accuracy", e["eval_accuracy"],
-                   "Accuracy on the validation split at the best epoch.")
-        add_metric(metrics, "best_val_loss", e["eval_loss"],
-                   "Cross-entropy loss on the validation split at the best epoch.")
-        add_metric(metrics, "best_val_precision", e["eval_precision"],
-                   "Macro-averaged precision on the validation split at the best epoch.")
-        add_metric(metrics, "best_val_recall",   e["eval_recall"],
-                   "Macro-averaged recall on the validation split at the best epoch.")
-        add_metric(metrics, "best_val_f1",       e["eval_f1"],
-                   "Macro-averaged F1 score on the validation split at the best epoch.")
-        add_metric(metrics, "best_val_mcc",      e["eval_mcc"],
-                   "Matthews correlation coefficient on the validation split at the best epoch.")
+        add(metrics,"best_val_epoch",e["epoch"],
+            "Epoch with highest validation accuracy.")
+        add(metrics,"best_val_accuracy",e["eval_accuracy"],
+            "Accuracy on validation split at best epoch.")
+        add(metrics,"best_val_loss",e["eval_loss"],
+            "Cross-entropy loss on validation split at best epoch.")
+        add(metrics,"best_val_precision",e["eval_precision"],
+            "Macro-precision on validation split at best epoch.")
+        add(metrics,"best_val_recall",e["eval_recall"],
+            "Macro-recall on validation split at best epoch.")
+        add(metrics,"best_val_f1",e["eval_f1"],
+            "Macro-F1 on validation split at best epoch.")
+        add(metrics,"best_val_mcc",e["eval_mcc"],
+            "Matthews correlation coefficient on validation split at best epoch.")
         break
-
-# final training loss
 for e in reversed(trainer.state.log_history):
     if "loss" in e and "eval_loss" not in e:
-        add_metric(metrics, "final_train_loss", e["loss"],
-                   "Cross-entropy loss on the last training step.")
+        add(metrics,"final_train_loss",e["loss"],
+            "Training loss on last step.")
         break
-
-# single evaluation on test set
 test_res = trainer.evaluate(dataset["test"])
-add_metric(metrics, "test_accuracy",  test_res["eval_accuracy"],
-           "Accuracy on the held-out test set.")
-add_metric(metrics, "test_loss",      test_res["eval_loss"],
-           "Cross-entropy loss on the test set.")
-add_metric(metrics, "test_precision", test_res["eval_precision"],
-           "Macro-averaged precision on the test set.")
-add_metric(metrics, "test_recall",    test_res["eval_recall"],
-           "Macro-averaged recall on the test set.")
-add_metric(metrics, "test_f1",        test_res["eval_f1"],
-           "Macro-averaged F1 score on the test set.")
-add_metric(metrics, "test_mcc",       test_res["eval_mcc"],
-           "Matthews correlation coefficient on the test set.")
+add(metrics,"test_accuracy", test_res["eval_accuracy"], "Accuracy on test set.")
+add(metrics,"test_loss",     test_res["eval_loss"],     "Loss on test set.")
+add(metrics,"test_precision",test_res["eval_precision"],"Macro-precision on test set.")
+add(metrics,"test_recall",   test_res["eval_recall"],   "Macro-recall on test set.")
+add(metrics,"test_f1",       test_res["eval_f1"],       "Macro-F1 on test set.")
+add(metrics,"test_mcc",      test_res["eval_mcc"],      "Matthews correlation coefficient on test set.")
 
 path = pathlib.Path("metrics.json")
 path.write_text(json.dumps(metrics, indent=2))

@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=10            # dataloader + tokeniser workers
 #SBATCH --mem=64G                     # system RAM
 # #SBATCH --time=24:00:00               # adjust as needed
-#SBATCH --output=train.%j.log         # stdout+stderr → slurm log file
+#SBATCH --output=gpu-train.%j.log         # stdout+stderr → slurm log file
 #-----------------------------------------------------------------------------#
 # If you need exclusive access to the node:
 # #SBATCH --exclusive
@@ -25,7 +25,7 @@ source .env-deberta-gpu/bin/activate
 unset HF_HUB_HEADERS HF_HUB_EXTRA_HEADERS HUGGINGFACE_HUB_HEADERS || true
 
 # 3. Launch the training script
-python train-gpu-2080ti-oom-safe.py
+python gpu-train-2080ti-oom-safe.py
 
 echo "========  Job $SLURM_JOB_ID finished at $(date)  ========"
 echo "Artifacts:"
