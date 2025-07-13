@@ -153,12 +153,16 @@ log("Saved best model → deberta-csv-final")
 import json, pathlib
 metrics = {}
 
-# 1) grab the best eval metrics stored during training
-for entry in trainer.state.log_history:
-    if "eval_accuracy" in entry:
-        metrics["best_val_epoch"]     = entry["epoch"]
-        metrics["best_val_accuracy"]  = entry["eval_accuracy"]
-        metrics["best_val_loss"]      = entry["eval_loss"]
+# 1) grab the epoch with the highest validation accuracy
+best_eval = None
+for e in trainer.state.log_history:
+    if "eval_accuracy" in e:
+        if best_eval is None or e["eval_accuracy"] > best_eval.get("eval_accuracy", -1):
+            best_eval = e
+if best_eval:
+    metrics["best_val_epoch"]    = best_eval["epoch"]
+    metrics["best_val_accuracy"] = best_eval["eval_accuracy"]
+    metrics["best_val_loss"]     = best_eval["eval_loss"]
 
 # 2) final training loss (last step)
 for entry in reversed(trainer.state.log_history):
