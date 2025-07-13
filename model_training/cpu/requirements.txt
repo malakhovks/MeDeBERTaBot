@@ -2,20 +2,20 @@
 # Add PyTorch’s CPU wheel index so +cpu builds resolve
 --extra-index-url https://download.pytorch.org/whl/cpu
 
-torch
-intel_extension_for_pytorch
+torch>=2.1
+intel_extension_for_pytorch>=2.1
 
 # Core scientific stack
-numpy
-pyarrow
-tqdm
+numpy>=1.24
+pyarrow>=13
+tqdm>=4.66
 
 # Hugging Face ecosystem
-datasets
-transformers
-evaluate
-sentencepiece
+datasets>=2.19
+transformers>=4.45,<4.48
+evaluate>=0.5
+sentencepiece>=0.1.99
 
 # Metrics & utilities
-scikit-learn
-psutil
+scikit-learn>=1.3
+psutil>=5.9
