@@ -188,25 +188,32 @@ tok.save_pretrained("deberta-csv-final")
 log("Saved best model → deberta-csv-final")
 
 # ── write metrics.json (unchanged) ───────────────────────────────
-def add(d, k, v, desc): d[k] = {"value": float(v), "description": desc}
+def add(d, k, v, desc):
+    d[k] = {"value": float(v), "description": desc}
+
 metrics = {}
+
+# pick the log entry with the highest validation accuracy
+best_eval = None
 for e in trainer.state.log_history:
     if "eval_accuracy" in e:
-        add(metrics,"best_val_epoch",e["epoch"],
-            "Epoch with highest validation accuracy.")
-        add(metrics,"best_val_accuracy",e["eval_accuracy"],
-            "Accuracy on validation split at best epoch.")
-        add(metrics,"best_val_loss",e["eval_loss"],
-            "Cross-entropy loss on validation split at best epoch.")
-        add(metrics,"best_val_precision",e["eval_precision"],
-            "Macro-precision on validation split at best epoch.")
-        add(metrics,"best_val_recall",e["eval_recall"],
-            "Macro-recall on validation split at best epoch.")
-        add(metrics,"best_val_f1",e["eval_f1"],
-            "Macro-F1 on validation split at best epoch.")
-        add(metrics,"best_val_mcc",e["eval_mcc"],
-            "Matthews correlation coefficient on validation split at best epoch.")
-        break
+        if best_eval is None or e["eval_accuracy"] > best_eval.get("eval_accuracy", -1):
+            best_eval = e
+if best_eval:
+    add(metrics, "best_val_epoch",    best_eval["epoch"],
+        "Epoch with highest validation accuracy.")
+    add(metrics, "best_val_accuracy", best_eval["eval_accuracy"],
+        "Accuracy on validation split at best epoch.")
+    add(metrics, "best_val_loss",     best_eval["eval_loss"],
+        "Cross-entropy loss on validation split at best epoch.")
+    add(metrics, "best_val_precision", best_eval["eval_precision"],
+        "Macro-precision on validation split at best epoch.")
+    add(metrics, "best_val_recall",    best_eval["eval_recall"],
+        "Macro-recall on validation split at best epoch.")
+    add(metrics, "best_val_f1",        best_eval["eval_f1"],
+        "Macro-F1 on validation split at best epoch.")
+    add(metrics, "best_val_mcc",       best_eval["eval_mcc"],
+        "Matthews correlation coefficient on validation split at best epoch.")
 for e in reversed(trainer.state.log_history):
     if "loss" in e and "eval_loss" not in e:
         add(metrics,"final_train_loss",e["loss"],
