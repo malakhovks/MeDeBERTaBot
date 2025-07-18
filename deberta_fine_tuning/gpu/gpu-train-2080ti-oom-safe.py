@@ -39,12 +39,13 @@ random.seed(SEED); np.random.seed(SEED); torch.manual_seed(SEED)
 if DEVICE == "cuda": torch.cuda.manual_seed_all(SEED)
 
 # ───────── hyper-params ───────────────────────────────────────────
-MODEL_NAME  = "microsoft/deberta-v3-small"
-CSV_PATH    = "data.csv"
-NUM_EPOCHS  = 4
-BATCH_SIZE  = 8          # step fits 11 GB
+MODEL_NAME  = "microsoft/deberta-v3-xsmall"
+# MODEL_NAME = "google/electra-small-generator"
+CSV_PATH    = "MeDeBERTaData_Q_Small.csv"
+NUM_EPOCHS  = 20
+BATCH_SIZE  = 16          # step fits 11 GB
 GRAD_ACCUM  = 4          # effective batch 32
-LR          = 2e-5
+LR          = 5e-5
 NUM_WORKER  = 4
 
 # ───────── data load & split ──────────────────────────────────────
@@ -68,7 +69,7 @@ except OSError:
     tok = AutoTokenizer.from_pretrained(MODEL_NAME)
 
 dataset = dataset.map(
-    lambda b: tok(b["question"], truncation=True, max_length=256),
+    lambda b: tok(b["question"], truncation=True, max_length=256), #256
     batched=True, num_proc=NUM_WORKER
 ).remove_columns(["question"])
 dataset.set_format("torch")
@@ -120,7 +121,11 @@ ta = dict(
     optim                      = "adamw_torch_fused",
     load_best_model_at_end     = True,
     metric_for_best_model      = "accuracy",
+    greater_is_better          = True,
+    max_grad_norm              = 1.0,
+    weight_decay               = 0.01,
     logging_strategy           = "steps",
+    warmup_steps               = 800, 
     logging_steps              = 50,
     report_to                  = [],
 )
