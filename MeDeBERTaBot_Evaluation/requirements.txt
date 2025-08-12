@@ -1,0 +1,19 @@
+# Python >= 3.10
+
+# Hugging Face stack
+datasets>=2.20.0
+evaluate>=0.4.2
+huggingface_hub>=0.23.0
+
+# llama.cpp Python bindings (build from source for CUDA)
+# llama-cpp-python>=0.2.90
+
+# HTTP client
+requests>=2.32.0
+
+# Dataset backends/utilities
+pyarrow>=14.0.2
+pandas>=2.2.2
+
+# Metrics (needed by many evaluate metrics such as F1/precision/recall)
+scikit-learn>=1.4.0
